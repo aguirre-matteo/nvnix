@@ -1,395 +1,86 @@
-# NvChad on Nix
+<div align="center">
+    <img alt="NvNix Logo" width="200" src="logo.svg">
+    <br>
+    NvNix, a <a href="https://github.com/nix-community/nix4nvchad">nix4nvchad</a> fork with some extra features.
+</div>
 
-![logo](https://nvchad.com/screenshots/onedark.webp)
+## Table of Contents
+- [Introduction](#introduction)
+- [Usage](#usage)
+    - [Installation](#installation)
+    - [Configuration](#configuration)
+- [License](#license)
 
-## What is it?
+## Introduction
+This repository offers a Home-Manager module for setting up NvChad in a declarative way. It works by creating an extra phase in Home-Manager's activation script, where the configuration is copied to the user's home directory. It's done this way since NvChad will try to edit the contents of the `lazy-lock.json` file, but that would fail since `/nix/store` is mounted as read-only filesystem.
 
-The repository contains nix flake to install the [NvChad](https://nvchad.com/)
-configuration on any system that uses `Nix` and `nix flakes`.
+## Usage
 
-### Flake contains:
-
-- nvchad package
-- home-manager module
-
-You can choose any of the presented methods to install NvChad.
-
-
-<details>
-  <summary> <b>General notes</b> </summary>
-  <br/>
-  NvChad itself is not an executable file, it is a perfect configuration for [Neovim](https://neovim.io/).
-
-  Unfortunately there is no easy way to add it to `/nix/store`
-  More precisely, it’s easy to add it, but it won’t work, at least for now (version 2.5)
-
-  This is due to the fact that by default `neovim` reads 
-  the file `~/.config/nvim/init.lua` and starts.
-  NvChad lazily loads plugins and on first load, `lazyvim` will save
-  `lazy-lock.json` next to `~/.config/nvim/init.lua`
-  As you understand, this is not a problem for any distribution and it 
-  does not violate the principles of [The Twelve Factor App](https://12factor.net/config)
-  because, as already said, NvChad is a configuration and not a package with an application.
-  But with Nix the problem is /nix/store is a read-only system,
-  the source code trying to write a file or change the current one will result in an error.
-  There will also be a problem with the ability to change the configuration
-  on the fly, since this changes the `chadrc.lua` file
-
-  The method We used to solve this problem (home-manager module) is a hack.
-  Don't worry, it doesn't break anything, but it doesn't follow the basic
-  principle of how home-manager adds configuration files to the user's home directory.
-  Absolutely all configuration files are stored in `/nix/store/`
-  By default, the home manager creates symbolic links from `/nix/store/` to the user's home directory.
-  This ensures that configuration changes after the next generation build are available to the user.
-
-  In addition, if you have ever created a declarative configuration
-  for vanilla `neovim` you know that plugins are also stored in `/nix/store/`
-  NvChad installs plugins in `~/.local/share/nvim/`.
-  This is not a problem for us, they are still immutable until you explicitly update them.
-  If your own NvChad configuration which you pass
-  to the module as `config.programs.nvchad.extraConfig`
-  contains `lazy-lock.json` specific plugin versions will be installed.
-
-  Here's everything you need to know before you start using NvChad with Nix
-  If you still need to add NvChad to your configuration, welcome!
-</details>
-
-
-## How it works?
-
-- you add this repository as `inputs` to flake.nix of your configuration
-- you add a package with `NvChad` to your configuration as an overlay or as a `home-manager` module
-- specify extraPackages and extraConfig for the package or module
-- you are building a new system generation
-- as a result, you will receive an executable file `nvim`, nvim.desktop to launch from the launcher and your own configuration overlay if you passed extraConfig
-- each extraPackages is available to NvChad, if this is for example an LSP server, NvChad will find its executable file
-- extraPackages are not available globally, they are only available in the NvChad scope
-- if you do not pass any parameters only `extraPackages` for starter configuration are included
-
-
-# Quick use without installation to try
-
-```console
-nix run github:nix-community/nix4nvchad/#nvchad
-```
-
-> [!WARNING]
-> Run the command above if you are not using your `neovim` configuration!
-> - If you already have a `neovim` configuration in `~/.config/nvim` and `init.lua` is present there
-> nvchad will not copy the configuration to the home directory and will probably not start correctly
-> - If there is no `init.lua` in `~/.config/nvim` but there are any other files, this will overwrite
-> `~/.config/nvim` with the `NvChad starter` configuration
-> - Your current configuration will be saved in `~/.config/nvim/nvim_%Y_%m_%d_%H_%M_%S.bak`
-
-
-# Installation
-
-To install it you **must have flake enabled** and your NixOS configuration
-**must be managed with flakes.** See [Flakes](https://nixos.wiki/wiki/Flakes) for
-instructions on how to install and enable them on NixOS.
-
-### First step
-
-You can add this flake as inputs in `flake.nix` in the repository
-containing your NixOS configuration:
+### Installation
+The first step is to add this repository to your flake's inputs. Also make sure you override its `nixpkgs` input, or otherwise you'll have to download two different versions of `nixpkgs`.
 
 ```nix
+{
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # ...
-    nix4nvchad = {
-      url = "github:nix-community/nix4nvchad";
+
+    nvnix = {
+      url = "github:aguirre-matteo/nvnix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # ...
   };
-```
-
-This flake provides an overlay for Nixpkgs, with package and a home-manager module.
-
-They are respectively found in the flake as
-
-- `inputs.nix4nvchad.packages.${system}.default`
-- `inputs.nix4nvchad.packages.${system}.nvchad`
-
-
-- `inputs.nix4nvchad.homeManagerModules.default`
-- `inputs.nix4nvchad.homeManagerModules.nvchad`
-- `inputs.nix4nvchad.homeManagerModule`
-
-(Where `${system}` is either `x86_64-linux` `aarch64-linux` `x86_64-darwin` `aarch64-darwin`)
-
-### Second step
-
-Output data can be added in different ways, for example this is how I do it for NixOS:
-
-In the example below, the home manager is installed as a NixOS module
-
-```nix
-  outputs = { self, nixpkgs, home-manager, ... }@inputs:
-    let
-      system = "x86_64-linux";
-      lib = nixpkgs.lib;
-      extraSpecialArgs = { inherit system inputs; };  # <- passing inputs to the attribute set for home-manager
-      specialArgs = { inherit system inputs; };       # <- passing inputs to the attribute set for NixOS (optional)
-    in {
-    nixosConfigurations = {
-      dummy-host = lib.nixosSystem {
-        modules = [
-          inherit specialArgs;           # <- this will make inputs available anywhere in the NixOS configuration
-          ./path/to/configuration.nix
-          home-manager.nixosModules.home-manager {
-            home-manager = {
-              inherit extraSpecialArgs;  # <- this will make inputs available anywhere in the HM configuration
-              useGlobalPkgs = true;
-              useUserPackages = true;
-              users.dummyUserName = import ./path/to/home.nix;
-            };
-          }
-        ];
-      };
-    };
-  };
-```
-
-If you are new to NixOS here is a useful channel [Vimjoyer](https://www.youtube.com/watch?v=rEovNpg7J0M)
-
-
-### Third step (optional)
-
-All we have to do is add `nvchad` to the list of available packages using overlays
-
-Somewhere in your `configuration.nix`
-
-```nix
-{ config, pkgs, inputs, ... }: {  # <-- inputs from flake
-  # ...
-  nixpkgs = { 
-    overlays = [
-      (final: prev: {
-        nvchad = inputs.nix4nvchad.packages."${pkgs.system}".nvchad;
-      })
-    ];
-  };
-  # ...
 }
 ```
 
-Now you can call the package anywhere as a package from nixpkgs
-
-- `pkgs.nvchad`
-
-Examples:
-- `users.users.<name>.packages = [ pkgs.nvchad ];` NixOS
-- `home.packages = with pkgs; [ pkgs.nvchad ];`  home-manager
-
-# Configuration
-
-Depending on which usage method you choose, take a look at a couple of snippets:
-
-### home-manager module
-
-Somewhere in your `home.nix` or a separate module:
-
-Default:
+Then import the module in your configuration. Make sure you can access the `inputs` argument in your HM config by passing it to `extraSpecialArgs`.
 
 ```nix
-{ inputs, config, pkgs, ... }: {
+{ inputs, ... }:
+
+{
   imports = [
-    inputs.nix4nvchad.homeManagerModule
+    inputs.homeManagerModules.nvnix
   ];
-  programs.nvchad.enable = true;
 }
 ```
 
-Or with customization of options:
+### Configuration
+Now you have some options under `programs.nvchad`. Here's a table with all the options and their respective description.
 
+| Option | Description |
+|--------|-------------|
+| `enable` | Whether to enable NvChad |
+| `package` | The Neovim package to use. Set it to null if you want to use the globally available `nvim` binary |
+| `finalPackage` | The final package containing the wrapped Neovim and the NvChad configuration |
+| `starterConfig` | The NvChad starter config to use. This allows you to use your own config instead of the one from NvChad |
+| `excludePackages` | List of packages to exclude from the default ones included to the wrapper's PATH |
+| `extraPackages` | List of extra packages to include as dependencies to the wrapper's PATH |
+| `extraPlugins` | Extra plugins to install through `lazy.nvim` |
+| `extraConfig` | Extra configuration to be loaded at the end of `init.lua` |
+| `chadrcConfig` | Config to be put to `chadrc.lua` |
+| `lazyLock` | The `lazy-lock.json` file for pinning the plugins versions |
+| `backup` | Whether to backup or not the previous Neovim config. You probably want to disable this in order to save disk space |
+| `desktopEntry.enable` | Whether to enable the desktop entry for NvChad |
+| `desktopEntry.title` | The title the desktop entry should display |
+| `desktopEntry.style` | Which logo the desktop entry should have. Either `light` or `dark` |
 
-```nix
-{ inputs, config, pkgs, ... }: {
-  imports = [
-    inputs.nix4nvchad.homeManagerModule
-  ];
-  programs.nvchad = {
-    enable = true;
-    extraPackages = with pkgs; [
-      nodePackages.bash-language-server
-      docker-compose-language-service
-      dockerfile-language-server-nodejs
-      emmet-language-server
-      nixd
-      (python3.withPackages(ps: with ps; [
-        python-lsp-server
-        flake8
-      ]))
-    ];
-    hm-activation = true;
-    backup = true;
-  };
-}
-```
+## Differences with respect to nix4nvchad
+The main differences between this project and the original `nix4nvchad` are:
 
-### Available options:
+- No use of a more complex wrapper. The original wrapped `nvim` automatically tried to 
+install NvChad's config if there's no an existing config.
+- The option `neovim` is renamed to `package`.
+- The option `lazy-lock` is renamed to `lazyLock`.
+- The option `gcc` is removed. Instead, I encourage you to override `finalPackage`.
+- The option `hm-activation` is removed, since it's redundant because when off the module has no effect to the user's environment.
+- Added the `desktopEntry` option, so users can opt-out from the desktop entry.
+- Added the `starterConfig` option, so users can change it direcly from their configs.
+- Added the `excludePackages` option, so users can opt-out from some of the preinstalled packages.
+- Code restructuring for making it more readable and maintainable.
 
-- [enable](#enable)
-- [neovim](#neovim)
-- [extraPlugins](#extraPlugins)
-- [extraPackages](#extraPackages)
-- [extraConfig](#extraConfig)
-- [gcc](#gcc)
-- [lazy-lock](#lazy-lock)
-- [hm-activation](#hm-activation)
-- [backup](#backup)
-
-All options are not required
-
-##### enable
-
-`true` or `false`
-
-If false ignore this module when build new generation
-
-##### neovim
-
-`pkgs.neovim`
-
-Neovim package for use under nvchad wrapper
-
-##### extraPlugins
-
-```lua
-return {
-  {"equalsraf/neovim-gui-shim",lazy=false},
-  {"lervag/vimtex",lazy=false},
-  {"nvim-lua/plenary.nvim"},
-  {
-    'xeluxee/competitest.nvim',
-    dependencies = 'MunifTanjim/nui.nvim',
-    config = function() require('competitest').setup() end,
-  },
-}
-```
-
-The extra plugins you want to install. Loaded by lazy.nvim
-
-##### extraPackages
-
-`[]` list of pkgs
-
-List of additional packages available for NvChad as runtime dependencies
-NvChad extensions assume that the libraries it need
-will be available globally.
-By default, all dependencies for the starting configuration are included.
-Overriding the option will expand this list.
-
-##### extraConfig
-
-`string`
-
-The config written in lua. It will be loaded after nvchad loaded.
-
-#### chadrcConfig (optional)
-
-`string`
-
-Configuration that replaces `chadrc.lua.` Make sure to include `local M = {}` at the top, and `return M` at the bottom.
-
-##### gcc
-
-`pkg.gcc`
-
-The gcc compiler you want to use.
-
-##### lazy-lock
-
-`string`
-
-A json file. Which is in ~/.config/nvim/lazy-lock.json to lock lazy.nvim's plugin.
-
-Leave it as "" if don't want it.
-
-##### hm-activation
-
-`true` or `false`
-
-It's a trick
-If you do not want home-manager to manage nvchad configuration, 
-set the false option. In this case, HM will not copy the configuration
-saved in /nix/store to ~/.config/nvim.
-This way you can customize the configuration in the usual way
-by cloning it from the NvChad repository.
-By default, the ~/.config/nvim is managed by HM.
-
-##### backup
-
-`true` or `false`
-
-Since the module violates the principle of immutability
-and copies NvChad to `~/.config/nvim` rather than creating
-a symbolic link by default, it will create a backup copy of
-`~/.config/nvim_%Y_%m_%d_%H_%M_%S.bak` when each generation.
-This ensures that the module
-will not delete the configuration accidentally.
-You probably do not need backups, just disable them
-`config.programs.nvchad.backup = false;`
-
-
-# Usage
-
-Whichever method you choose, after installation you'll probably want to run `NvChad`.  
-Using the `nvim` wrapper executable it will be automatically available in your `$PATH`.  
-You can also launch through the application manager (rofi, wofi, etc).  
-The package comes with `nvim.desktop`.  
-
-If you are not using the HM module or have disabled `hm-activation`:
-- `NvChad` expects `~/.config/nvim/init.lua` to be available at startup
-- if the file does not exist, `NvChad` will copy it and all files from `/nix/store/hash-nvchad-2.5/config`
-- this will be either your configuration or starter
-- if `~/.config/nvim/` is not empty `NvChad` will create a backup copy nearby
-
-#### Note!
-
-If you are using the NvChad home-manager module, do not add neovim from the standard module:
-
-```nix
-programs.neovim.enable = true;
-```
-Also, do not add neovim as a package to the configuration:
- ```nix
-home.packages = [ pkgs.neovim ];
-```
-
-# Use your own NvChad configuration
-
-You can use your own NvChad configuration by providing your own repository or local folder.  
-It has to follow the structure of [the NvChad starter](https://github.com/NvChad/starter) (a fork or local copy).  
-
-```nix
-  inputs = {
-    # Default:
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    home-manager = {
-      url = "github:nix-community/home-manager";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # adding the starter input here
-    nvchad-starter = {
-      url = "github.com:<github-username>/<repository-name>"; # <- replace this with your own
-      # url = "path:<local_path>" # <- for local relative folder (e.g. path:./home/nvim) 
-      flake = false;
-    }
-
-    nix4nvchad = {
-      url = "github:nix-community/nix4nvchad";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nvchad-starter.follows = "nvchad-starter"; # <- overwrite the module input here
-    };
-  };
-```
-
-And follow above steps.
+## License
+All the code in this repository is under the GPL-3.0 license. You can see the details [here](LICENSE).
